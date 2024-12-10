@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
@@ -25,8 +24,6 @@ app = Flask(__name__)
 
 # Initialize global variables
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")  # Automatically provided by Render
-PORT = int(os.environ.get("PORT", 8080))
 
 # Application initialization
 bot_app = Application.builder().token(BOT_TOKEN).build()
@@ -142,33 +139,31 @@ async def split_and_upload(file_path, query):
             part_number += 1
 
 
-# Flask webhook endpoint
+# Flask webhook endpoint (sync version)
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(await request.get_json(force=True), bot_app.bot)
-    await bot_app.process_update(update)
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    bot_app.process_update(update)
     return jsonify({"status": "ok"})
 
 
 # Main function
-async def main():
+def main():
     # Add handlers
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     bot_app.add_handler(CallbackQueryHandler(download_and_upload))
 
-    # Set webhook
-    await bot_app.bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
-
     # Use an ASGI server like Hypercorn
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
     config = Config()
-    config.bind = [f"0.0.0.0:{PORT}"]
-    await serve(app, config)
+    config.bind = ["0.0.0.0:8080"]
+    serve(app, config)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+            
