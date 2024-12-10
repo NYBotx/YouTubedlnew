@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
@@ -10,7 +11,7 @@ from telegram.ext import (
     filters,
 )
 from yt_dlp import YoutubeDL
-from flask import Flask, request
+from flask import Flask, request, jsonify
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -26,6 +27,9 @@ app = Flask(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")  # Automatically provided by Render
 PORT = int(os.environ.get("PORT", 8080))
+
+# Application initialization
+bot_app = Application.builder().token(BOT_TOKEN).build()
 
 
 # Fetch video formats
@@ -140,29 +144,26 @@ async def split_and_upload(file_path, query):
 
 # Flask webhook endpoint
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
-    bot.process_update(update)
-    return "ok"
+async def webhook():
+    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    await bot_app.process_update(update)
+    return jsonify({"status": "ok"})
 
 
+# Main function
 async def main():
-    global bot
-    bot = Application.builder().token(BOT_TOKEN).build()
-
     # Add handlers
-    bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CommandHandler("help", help_command))
-    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
-    bot.add_handler(CallbackQueryHandler(download_and_upload))
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    bot_app.add_handler(CallbackQueryHandler(download_and_upload))
 
-    # Set Webhook
-    await bot.bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
+    # Set webhook
+    await bot_app.bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
 
     # Run Flask app
     app.run(host="0.0.0.0", port=PORT)
 
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
