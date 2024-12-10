@@ -1,3 +1,4 @@
 python-telegram-bot==20.3
 yt-dlp==2023.10.7
-Flask==2.3.2
+Flask[async]==2.3.2
+hypercorn==0.14.0
