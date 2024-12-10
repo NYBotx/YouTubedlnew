@@ -145,7 +145,7 @@ async def split_and_upload(file_path, query):
 # Flask webhook endpoint
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 async def webhook():
-    update = Update.de_json(request.get_json(force=True), bot_app.bot)
+    update = Update.de_json(await request.get_json(force=True), bot_app.bot)
     await bot_app.process_update(update)
     return jsonify({"status": "ok"})
 
@@ -161,8 +161,13 @@ async def main():
     # Set webhook
     await bot_app.bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
 
-    # Run Flask app
-    app.run(host="0.0.0.0", port=PORT)
+    # Use an ASGI server like Hypercorn
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    config = Config()
+    config.bind = [f"0.0.0.0:{PORT}"]
+    await serve(app, config)
 
 
 if __name__ == "__main__":
