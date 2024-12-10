@@ -2,16 +2,15 @@ import os
 import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    CallbackContext,
-    Filters,
+    ContextTypes,
+    filters,
 )
 from yt_dlp import YoutubeDL
 from flask import Flask, request
-from telegram.ext import Dispatcher
 
 # Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -50,8 +49,8 @@ def fetch_formats(url):
 
 
 # Command: Start
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "🎉 Welcome to the **YouTube Downloader Bot**!\n\n"
         "📽 Send me a YouTube link to download videos or audio in your preferred quality.\n"
         "Use /help for instructions."
@@ -59,8 +58,8 @@ def start(update: Update, context: CallbackContext):
 
 
 # Command: Help
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "📋 **How to use the bot:**\n\n"
         "1️⃣ Send a YouTube link.\n"
         "2️⃣ Choose the desired quality or audio-only option.\n"
@@ -70,12 +69,12 @@ def help_command(update: Update, context: CallbackContext):
 
 
 # Handle YouTube URL
-def handle_url(update: Update, context: CallbackContext):
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
-    update.message.reply_text("🔄 Fetching available formats...")
+    await update.message.reply_text("🔄 Fetching available formats...")
     formats = fetch_formats(url)
     if not formats:
-        update.message.reply_text("❌ Could not fetch formats. Please check the URL.")
+        await update.message.reply_text("❌ Could not fetch formats. Please check the URL.")
         return
 
     buttons = [
@@ -83,17 +82,17 @@ def handle_url(update: Update, context: CallbackContext):
         for f in formats
     ]
     buttons.append([InlineKeyboardButton("🔊 Audio Only", callback_data=f"{url}|bestaudio")])
-    update.message.reply_text(
+    await update.message.reply_text(
         "🎥 Choose your desired format:", reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 
 # Download and upload
-def download_and_upload(update: Update, context: CallbackContext):
+async def download_and_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    query.answer()
+    await query.answer()
     url, format_id = query.data.split("|")
-    query.edit_message_text("⏳ Downloading your video... Please wait.")
+    await query.edit_message_text("⏳ Downloading your video... Please wait.")
 
     output_file = f"{url.split('=')[-1]}_{format_id}.mp4"
     ydl_opts = {
@@ -110,20 +109,20 @@ def download_and_upload(update: Update, context: CallbackContext):
         # Check file size
         file_size = os.path.getsize(output_file)
         if file_size > TELEGRAM_FILE_LIMIT:
-            query.edit_message_text("📦 File too large! Splitting into smaller parts...")
-            split_and_upload(output_file, query)
+            await query.edit_message_text("📦 File too large! Splitting into smaller parts...")
+            await split_and_upload(output_file, query)
         else:
             # Upload directly
             with open(output_file, "rb") as file:
-                query.message.reply_video(file, caption="🎬 Here is your video!")
+                await query.message.reply_video(file, caption="🎬 Here is your video!")
         os.remove(output_file)
     except Exception as e:
         logger.error(f"Error: {e}")
-        query.edit_message_text("❌ Failed to download or upload the video.")
+        await query.edit_message_text("❌ Failed to download or upload the video.")
 
 
 # Split and upload large files
-def split_and_upload(file_path, query):
+async def split_and_upload(file_path, query):
     part_number = 1
     with open(file_path, "rb") as f:
         while chunk := f.read(TELEGRAM_FILE_LIMIT):
@@ -132,39 +131,38 @@ def split_and_upload(file_path, query):
                 part_file.write(chunk)
 
             with open(part_filename, "rb") as part_file:
-                query.message.reply_document(
+                await query.message.reply_document(
                     part_file, caption=f"📦 Part {part_number} of the video."
                 )
             os.remove(part_filename)
             part_number += 1
 
 
-# Set up Webhook endpoint
+# Flask webhook endpoint
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    bot.process_update(update)
     return "ok"
 
 
-def main():
-    global bot, dispatcher
-    from telegram import Bot
-    bot = Bot(token=BOT_TOKEN)
-    dispatcher = Dispatcher(bot, None, use_context=True)
+async def main():
+    global bot
+    bot = Application.builder().token(BOT_TOKEN).build()
 
     # Add handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_url))
-    dispatcher.add_handler(CallbackQueryHandler(download_and_upload))
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CommandHandler("help", help_command))
+    bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    bot.add_handler(CallbackQueryHandler(download_and_upload))
 
     # Set Webhook
-    bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
+    await bot.bot.set_webhook(f"{WEBHOOK_URL}/{BOT_TOKEN}")
 
     # Run Flask app
     app.run(host="0.0.0.0", port=PORT)
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
